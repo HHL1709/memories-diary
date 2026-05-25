@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Memories Diary</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Playfair+Display+SC:wght@400;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <style>
@@ -576,6 +576,59 @@ html{-webkit-text-size-adjust:100%;}
 .dc-del-btn:hover{background:rgba(180,50,40,.12);border-color:rgba(200,60,50,.6);color:rgba(200,60,50,.9);}
 .diary-card{position:relative;}
 @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+
+/* ── Safe Area (iPhone notch/home bar) ── */
+html {
+  -webkit-text-size-adjust: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.top-nav {
+  padding-top: max(.5rem, env(safe-area-inset-top));
+  padding-left: max(1.8rem, env(safe-area-inset-left));
+  padding-right: max(1.8rem, env(safe-area-inset-right));
+  height: auto;
+  min-height: 54px;
+  box-sizing: border-box;
+}
+.page-wrap {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Photo rendering fix ── */
+img {
+  max-width: 100%;
+  display: block;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pg-photo img,
+.fp-photo img,
+.lay3-left img,
+.lay5-big-photo img,
+.lay6-photo-frame img,
+.polaroid img,
+.tl-photo,
+.full-photo-page img,
+.scrap-photo img {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: auto;
+}
+/* Fix cover photo */
+.cover-photo-state img,
+.dc-book img {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
 </style>
 
   <!-- Firebase -->
@@ -699,6 +752,18 @@ html{-webkit-text-size-adjust:100%;}
     }
 
     // Expose to global
+    
+  // Restore last diary on refresh (if data loaded)
+  function tryRestoreLastDiary(){
+    try{
+      var lastId=sessionStorage.getItem('lastDiaryId');
+      if(lastId && diaries.length > 0){
+        var d=diaries.find(function(x){return x.id===lastId;});
+        if(d){openDiary(lastId);return;}
+      }
+    }catch(e){}
+  }
+
     window.uploadToCloudinary = uploadToCloudinary;
     window.saveDiaryToFirestore = saveDiaryToFirestore;
     window.loadDiariesFromFirestore = loadDiariesFromFirestore;
@@ -841,7 +906,7 @@ html{-webkit-text-size-adjust:100%;}
                 <div class="ct-tag" id="cover-tag-txt"></div>
                 <div class="ct-deco"></div><div class="ct-hint">click to open</div>
               </div>
-              <div class="cp-state" id="cover-photo-state"><img id="cover-photo-img" src="" alt=""></div>
+              <div class="cp-state" id="cover-photo-state"><img id="cover-photo-img" src="" alt="" crossorigin="anonymous" loading="lazy"></div>
               <button class="cover-photo-btn" onclick="event.stopPropagation();pinGo('cover-photo')" title="Cover photo"><svg viewBox="0 0 16 16" style="width:14px;height:14px;" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="1" y="5" width="14" height="9" rx="1.5"/><circle cx="8" cy="9.5" r="2.5"/><path d="M5 5l1.5-2h3L11 5"/></svg></button>
             </div>
           </div>
@@ -1047,6 +1112,8 @@ function openDiary(id){
   var bw=document.getElementById('book-open-wrap');bw.classList.remove('show');bw.style.display='none';
   document.getElementById('book-3d').style.transform='';
   document.getElementById('top-edit-btn').style.display='none';
+  // Save current diary id for refresh
+  try{sessionStorage.setItem('lastDiaryId', curDiary.id);}catch(e){}
   show('s-diary');
 }
 function updateCoverState(){
@@ -1179,7 +1246,7 @@ function renderPhotoBottom(pg,side){
   return'<div class="lay1-content">'+(pg.date?'<div class="pg-date">'+pg.date+'</div>':'')+'<div class="pg-text">'+pg.text+'</div>'+photo+'</div>';
 }
 function renderFullPhoto(pg,side){
-  if(pg.photo)return'<div class="full-photo-page"><img src="'+pg.photo+'" class="'+(pg.fit||'fc')+'"></div>';
+  if(pg.photo)return'<div class="full-photo-page"><img src="'+pg.photo+'" class="'+(pg.fit||'fc')+'" loading="lazy" crossorigin="anonymous"></div>';
   return'<div class="full-photo-page" style="background:#e8dfc8;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;"><svg viewBox="0 0 32 32" style="width:32px;height:32px;opacity:.3;" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="26" height="26" rx="3"/><circle cx="10" cy="10" r="3"/><path d="M3 22l8-8 6 6 4-4 6 6"/></svg><span style="color:rgba(140,110,70,.4);font-size:11px;letter-spacing:2px;">No Photo Yet</span></div>';
 }
 function renderTextOnly(pg,side){
@@ -1607,7 +1674,50 @@ function getTagIcon(tag){
   };
   return icons[tag]||'';
 }
-function show(id){document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});var el=document.getElementById(id);el.classList.add('active');el.style.animation='none';void el.offsetHeight;el.style.animation='';}
+function show(id){
+  document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
+  var el=document.getElementById(id);
+  if(!el)return;
+  el.classList.add('active');
+  el.style.animation='none';
+  void el.offsetHeight;
+  el.style.animation='';
+  // Update hash for browser back button
+  if(window.location.hash !== '#'+id){
+    history.pushState({screen:id}, '', '#'+id);
+  }
+  // Scroll to top
+  window.scrollTo(0,0);
+}
+
+// Handle browser back/forward
+window.addEventListener('popstate', function(e){
+  var id = (e.state && e.state.screen) ? e.state.screen : 's-welcome';
+  // Don't push state again when popping
+  document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
+  var el=document.getElementById(id);
+  if(el){
+    el.classList.add('active');
+    el.style.animation='none';
+    void el.offsetHeight;
+    el.style.animation='';
+  }
+  window.scrollTo(0,0);
+});
+
+// On page load, restore screen from hash or show welcome
+window.addEventListener('DOMContentLoaded', function(){
+  var hash = window.location.hash.replace('#','');
+  var validScreens = ['s-welcome','s-choose','s-add-diary','s-diary','s-pin','s-editor'];
+  if(hash && validScreens.indexOf(hash) > -1 && hash !== 's-diary' && hash !== 's-editor' && hash !== 's-pin'){
+    // Only restore safe screens (not diary-specific ones)
+    show(hash);
+  } else {
+    // Always start at welcome, clear hash
+    history.replaceState({screen:'s-welcome'}, '', window.location.pathname);
+    show('s-welcome');
+  }
+});
 </script>
 
 <!-- Loading Screen -->
@@ -1628,6 +1738,5 @@ function show(id){document.querySelectorAll('.screen').forEach(function(s){s.cla
   <div style="font-family:'Playfair Display SC',serif;font-size:11px;letter-spacing:4px;color:#6a4406;">Uploading Photo...</div>
   <div style="font-size:10px;color:#a07840;letter-spacing:2px;">Please wait</div>
 </div>
-
 </body>
 </html>
