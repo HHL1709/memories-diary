@@ -631,12 +631,11 @@ img {
 }
 </style>
 
-  <!-- Firebase -->
-  <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot }
-      from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-
+  <!-- Firebase Compat SDK (global scope access) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script>
+    // Firebase init
     const firebaseConfig = {
       apiKey: "AIzaSyCPO4Z-_65ihDvV3PCm7mvi5Tv-5ag4kCs",
       authDomain: "memories-diary-b5156.firebaseapp.com",
@@ -645,45 +644,39 @@ img {
       messagingSenderId: "297771164063",
       appId: "1:297771164063:web:e0cd2a6d44d83090a95daa"
     };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    // Expose db and Firestore functions to global scope
-    window.db = db;
-    window.fsCollection = collection;
-    window.fsDoc = doc;
-    window.fsSetDoc = setDoc;
-    window.fsGetDoc = getDoc;
-    window.fsGetDocs = getDocs;
-    window.fsDeleteDoc = deleteDoc;
-    window.fsOnSnapshot = onSnapshot;
-    window.firebaseReady = true;
+    firebase.initializeApp(firebaseConfig);
+    var db = firebase.firestore();
 
     // ── Cloudinary Config ──
-    const CLOUD_NAME = 'dpgtlt4ku';
-    const UPLOAD_PRESET = 'diary_photos';
+    var CLOUD_NAME = 'dpgtlt4ku';
+    var UPLOAD_PRESET = 'diary_photos';
 
+    function showUploadProgress(show) {
+      var el = document.getElementById('upload-progress');
+      if (el) el.style.display = show ? 'flex' : 'none';
+    }
+
+    function showLoadingScreen(show) {
+      var el = document.getElementById('loading-screen');
+      if (el) el.style.display = show ? 'flex' : 'none';
+    }
+
+    // ── Upload photo to Cloudinary ──
     async function uploadToCloudinary(file) {
-      const formData = new FormData();
+      var formData = new FormData();
       formData.append('file', file);
       formData.append('upload_preset', UPLOAD_PRESET);
       formData.append('folder', 'memories_diary');
-
       showUploadProgress(true);
       try {
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-          method: 'POST',
-          body: formData
+        var res = await fetch('https://api.cloudinary.com/v1_1/' + CLOUD_NAME + '/image/upload', {
+          method: 'POST', body: formData
         });
-        const data = await res.json();
+        var data = await res.json();
         showUploadProgress(false);
-        if (data.secure_url) {
-          return data.secure_url; // permanent Cloudinary URL
-        } else {
-          alert('Photo upload failed. Please try again.');
-          return null;
-        }
+        if (data.secure_url) return data.secure_url;
+        alert('Photo upload failed. Please try again.');
+        return null;
       } catch(e) {
         showUploadProgress(false);
         alert('Upload error: ' + e.message);
@@ -691,90 +684,116 @@ img {
       }
     }
 
-    function showUploadProgress(show) {
-      var el = document.getElementById('upload-progress');
-      if (el) el.style.display = show ? 'flex' : 'none';
-    }
-
-    // ── Firestore Functions ──
+    // ── Save diary to Firestore ──
     async function saveDiaryToFirestore(diary) {
-      if (!window.db) return;
+      if (!db || !diary) return;
       try {
-        const diaryData = {
+        // Serialize - remove any undefined values
+        var diaryData = JSON.parse(JSON.stringify({
           id: diary.id,
-          name: diary.name,
+          name: diary.name || '',
           tag: diary.tag || '',
           year: diary.year || '',
-          color: diary.color,
-          spine: diary.spine,
+          color: diary.color || '#1a1228',
+          spine: diary.spine || '#0e0c1e',
           coverPhoto: diary.coverPhoto || '',
           firstPageL: diary.firstPageL || {},
           firstPageR: diary.firstPageR || {},
           pages: diary.pages || [],
           updatedAt: new Date().toISOString()
-        };
-        await window.fsSetDoc(window.fsDoc(window.db, 'diaries', diary.id), diaryData);
+        }));
+        await db.collection('diaries').doc(diary.id).set(diaryData);
+        console.log('Saved:', diary.name);
       } catch(e) {
-        console.error('Save error:', e);
+        console.error('Save error:', e.message);
+        alert('Save failed: ' + e.message);
       }
     }
 
+    // ── Load all diaries from Firestore ──
     async function loadDiariesFromFirestore() {
-      if (!window.db) return;
+      if (!db) return;
+      showLoadingScreen(true);
       try {
-        document.getElementById('loading-screen').style.display = 'flex';
-        const snapshot = await window.fsGetDocs(window.fsCollection(window.db, 'diaries'));
+        var snapshot = await db.collection('diaries').orderBy('updatedAt', 'desc').get();
         if (!snapshot.empty) {
+          // Use global diaries array
           diaries = [];
-          snapshot.forEach(function(docSnap) {
-            diaries.push(docSnap.data());
+          snapshot.forEach(function(doc) {
+            var d = doc.data();
+            // Ensure all required fields exist
+            d.pages = d.pages || [];
+            d.firstPageL = d.firstPageL || {date:'',text:'',layout:'std',photo:null,fit:'fc',extra:{}};
+            d.firstPageR = d.firstPageR || {date:'',text:'',layout:'std',photo:null,fit:'fc',extra:{}};
+            d.coverPhoto = d.coverPhoto || null;
+            diaries.push(d);
           });
-          // Sort by updatedAt descending
-          diaries.sort(function(a,b){
-            return (b.updatedAt||'') > (a.updatedAt||'') ? 1 : -1;
-          });
+          console.log('Loaded', diaries.length, 'diaries from Firestore');
+        } else {
+          console.log('No diaries in Firestore yet');
         }
-        document.getElementById('loading-screen').style.display = 'none';
+        showLoadingScreen(false);
         renderDiaryList();
+        // Try restore last open diary
+        tryRestoreLastDiary();
       } catch(e) {
-        document.getElementById('loading-screen').style.display = 'none';
-        console.error('Load error:', e);
+        showLoadingScreen(false);
+        console.error('Load error:', e.message);
+        // Still show local diaries if any
+        renderDiaryList();
       }
     }
 
+    // ── Delete diary from Firestore ──
     async function deleteDiaryFromFirestore(id) {
-      if (!window.db) return;
+      if (!db || !id) return;
       try {
-        await window.fsDeleteDoc(window.fsDoc(window.db, 'diaries', id));
+        await db.collection('diaries').doc(id).delete();
+        console.log('Deleted diary:', id);
       } catch(e) {
-        console.error('Delete error:', e);
+        console.error('Delete error:', e.message);
       }
     }
 
-    // Expose to global
-    
-  // Restore last diary on refresh (if data loaded)
-  function tryRestoreLastDiary(){
-    try{
-      var lastId=sessionStorage.getItem('lastDiaryId');
-      if(lastId && diaries.length > 0){
-        var d=diaries.find(function(x){return x.id===lastId;});
-        if(d){openDiary(lastId);return;}
-      }
-    }catch(e){}
-  }
-
-    window.uploadToCloudinary = uploadToCloudinary;
-    window.saveDiaryToFirestore = saveDiaryToFirestore;
-    window.loadDiariesFromFirestore = loadDiariesFromFirestore;
-    window.deleteDiaryFromFirestore = deleteDiaryFromFirestore;
-
-
-    // Load diaries from Firestore on startup
-    window.addEventListener('load', function() {
-      setTimeout(loadDiariesFromFirestore, 500);
-    });
+    // ── Real-time listener — auto sync on any device ──
+    var unsubscribe = null;
+    function startRealtimeSync() {
+      if (unsubscribe) unsubscribe(); // stop previous listener
+      unsubscribe = db.collection('diaries')
+        .orderBy('updatedAt', 'desc')
+        .onSnapshot(function(snapshot) {
+          diaries = [];
+          snapshot.forEach(function(doc) {
+            var d = doc.data();
+            d.pages = d.pages || [];
+            d.firstPageL = d.firstPageL || {date:'',text:'',layout:'std',photo:null,fit:'fc',extra:{}};
+            d.firstPageR = d.firstPageR || {date:'',text:'',layout:'std',photo:null,fit:'fc',extra:{}};
+            d.coverPhoto = d.coverPhoto || null;
+            diaries.push(d);
+          });
+          // Update diary list if on choose screen
+          var chooseScreen = document.getElementById('s-choose');
+          if (chooseScreen && chooseScreen.classList.contains('active')) {
+            renderDiaryList();
+          }
+          // If currently viewing a diary, update it silently
+          if (curDiary) {
+            var updated = diaries.find(function(d){ return d.id === curDiary.id; });
+            if (updated) {
+              curDiary = updated;
+              // Refresh page if not in editor
+              var editorActive = document.getElementById('s-editor');
+              if (editorActive && !editorActive.classList.contains('active')) {
+                renderSpread(curSpread);
+              }
+            }
+          }
+        }, function(e) {
+          console.error('Sync error:', e.message);
+        });
+    }
   </script>
+
 </head>
 <body>
 <div class="app">
@@ -806,8 +825,8 @@ img {
     </div>
     <div class="content">
       <div>
-        <div class="ch-orn">Personal Collection of</div>
-        <div class="ch-title">My Memories</div>
+        <div class="ch-orn">Personal Collection</div>
+        <div class="ch-title">Koi Open My Diary</div>
         <div class="ch-rule"><div class="ch-rl"></div><div class="ch-dot"></div><div class="ch-rl"></div></div>
       </div>
       <div class="diary-list" id="diary-list"></div>
@@ -943,7 +962,7 @@ img {
     </div>
     <div class="content"><div class="pin-outer"><div class="pin-card">
       <div class="pin-orn">Verification Required</div>
-      <div class="pin-title">ENTER PIN</div>
+      <div class="pin-title">6-Digit PIN</div>
       <div class="pin-purpose" id="pin-purpose-txt">Verify karo</div>
       <div class="pin-dots" id="pdots"></div>
       <div class="pin-grid">
@@ -953,7 +972,7 @@ img {
         <button class="pb sm" onclick="pclear()">CLR</button><button class="pb" onclick="pp(0)">0</button><button class="pb sm" onclick="pinCancel()">✕</button>
       </div>
       <div class="pin-msg" id="pmsg"></div>
-      <div class="pin-demo"></div>
+      <div class="pin-demo">Demo PIN: 1 2 3 4 5 6</div>
     </div></div></div>
   </div>
 </div>
@@ -1047,14 +1066,23 @@ var diaries=[
 ];
 
 var curDiary=null,curSpread=0;
-var pinAction='',pinVal='',PIN='020110',pinPrev='s-choose';
+var pinAction='',pinVal='',PIN='123456',pinPrev='s-choose';
 var editPageIdx=0,editTargetSide='left',editorMode='normal';
 var curLayout='std',curEditPhoto=null,curEditFit='fc',curEditExtra={};
 var deleteDiaryId=null;
 var ndColor='#1a1228',ndSpine='#0e0c1e',ndTag='';
 
 init();
-function init(){renderDiaryList();renderPinDots();}
+function init(){
+  renderPinDots();
+  renderDiaryList(); // show local first
+  // Load from Firestore after page ready
+  if(typeof loadDiariesFromFirestore === 'function'){
+    loadDiariesFromFirestore().then(function(){
+      startRealtimeSync(); // start live sync after initial load
+    });
+  }
+}
 
 /* ═══ DIARY LIST ═══ */
 function renderDiaryList(){
@@ -1090,8 +1118,7 @@ function createDiary(){
   document.getElementById('nd-name').value='';
   document.getElementById('nd-year').value='';
   document.getElementById('nd-msg').textContent='';
-  // Save new diary to Firestore
-  if(window.saveDiaryToFirestore) window.saveDiaryToFirestore(diaries[0]);
+  if(typeof saveDiaryToFirestore === 'function') saveDiaryToFirestore(diaries[0]);
   show('s-choose');
 }
 
@@ -1157,7 +1184,7 @@ function handleCoverPhoto(input){
         curDiary.coverPhoto=url;
         updateCoverState();
         renderDiaryList();
-        if(window.saveDiaryToFirestore) window.saveDiaryToFirestore(curDiary);
+        if(typeof saveDiaryToFirestore === 'function') saveDiaryToFirestore(curDiary);
       }
     });
   } else {
@@ -1439,7 +1466,7 @@ function turnPage(dir){
 
 function addNewPage(){
   curDiary.pages.push({date:'',text:'Write your memory here...',layout:'std',photo:null,fit:'fc',extra:{}});
-  if(window.saveDiaryToFirestore) window.saveDiaryToFirestore(curDiary);
+  if(typeof saveDiaryToFirestore === 'function') saveDiaryToFirestore(curDiary);
   renderDiaryList();
   var sp=document.getElementById('spread');sp.style.transition='opacity .2s';sp.style.opacity='.1';
   setTimeout(function(){var s=Math.ceil(curDiary.pages.length/2);renderSpread(s);sp.style.opacity='1';setTimeout(function(){sp.style.transition='';},220);},200);
@@ -1655,7 +1682,7 @@ function deleteDiary(){
   var d=diaries.find(function(x){return x.id===deleteDiaryId;});
   if(!d)return;
   // Delete from Firestore
-  if(window.deleteDiaryFromFirestore) window.deleteDiaryFromFirestore(deleteDiaryId);
+  if(typeof deleteDiaryFromFirestore === 'function') deleteDiaryFromFirestore(deleteDiaryId);
   diaries=diaries.filter(function(x){return x.id!==deleteDiaryId;});
   deleteDiaryId=null;
   renderDiaryList();
@@ -1673,6 +1700,16 @@ function getTagIcon(tag){
     'General':'<svg viewBox="0 0 16 16" style="width:10px;height:10px;vertical-align:middle;margin-right:3px;" fill="currentColor"><path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z"/></svg>'
   };
   return icons[tag]||'';
+}
+
+function tryRestoreLastDiary(){
+  try{
+    var lastId=sessionStorage.getItem('lastDiaryId');
+    if(lastId && diaries.length > 0){
+      var d=diaries.find(function(x){return x.id===lastId;});
+      if(d){openDiary(lastId);return;}
+    }
+  }catch(e){}
 }
 function show(id){
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
@@ -1738,5 +1775,6 @@ window.addEventListener('DOMContentLoaded', function(){
   <div style="font-family:'Playfair Display SC',serif;font-size:11px;letter-spacing:4px;color:#6a4406;">Uploading Photo...</div>
   <div style="font-size:10px;color:#a07840;letter-spacing:2px;">Please wait</div>
 </div>
+
 </body>
 </html>
